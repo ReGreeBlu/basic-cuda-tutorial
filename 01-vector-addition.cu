@@ -11,11 +11,12 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 // CUDA kernel function to add two vectors
 __global__ void vectorAdd(const float *A, const float *B, float *C, int numElements) {
     // Get the unique thread ID, which is the index in the vector
-    int i = blockDim.x * blockIdx.x + threadIdx.x;
+    int i = (blockDim.x * blockIdx.x + threadIdx.x) * 2;
     
     // Make sure we don't go out of bounds
     if (i < numElements) {
@@ -23,9 +24,15 @@ __global__ void vectorAdd(const float *A, const float *B, float *C, int numEleme
     }
 }
 
+void vectorAddCPU(const float *A, const float *B, float *C, int numElements) {
+    for (int i = 0; i < numElements; i++) {
+        C[i] = A[i] + B[i];
+    }
+}
+
 int main() {
     // Vector size and memory size
-    int numElements = 50000;
+    int numElements = 5000000;
     size_t size = numElements * sizeof(float);
     
     printf("Vector addition of %d elements\n", numElements);
@@ -54,12 +61,39 @@ int main() {
     cudaMemcpy(d_B, h_B, size, cudaMemcpyHostToDevice);
     
     // Launch the CUDA kernel
-    int threadsPerBlock = 256;
+    int threadsPerBlock = 1024;
     int blocksPerGrid = (numElements + threadsPerBlock - 1) / threadsPerBlock;
     printf("CUDA kernel launch with %d blocks of %d threads\n", blocksPerGrid, threadsPerBlock);
     
+    // Measure GPU time
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+
     vectorAdd<<<blocksPerGrid, threadsPerBlock>>>(d_A, d_B, d_C, numElements);
+    vectorAdd<<<blocksPerGrid, threadsPerBlock>>>(d_A + 1, d_B + 1, d_C + 1, numElements);
+
+    cudaEventRecord(stop); 
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    printf("Kernel execution time: %.3f ms\n", milliseconds);
     
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    /*
+    // Measure CPU time 
+    clock_t cpuStart = clock();
+    vectorAddCPU(h_A, h_B, h_C, numElements);
+    clock_t cpuStop = clock();
+    float cpuMilliseconds = 1000.0 * (cpuStop - cpuStart) / CLOCKS_PER_SEC;
+    printf("CPU execution time: %.3f ms\n", cpuMilliseconds);
+    */
+
     // Check for errors in kernel launch
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
